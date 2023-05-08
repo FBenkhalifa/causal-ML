@@ -1,4 +1,4 @@
-# Microeconometrics - Group 5
+# Microeconometrics - Group 1
 
 This repository contains the source code for the analysis of the skiing data set. In this readme we provide
 information on how to setup the project, on how the code is structured and how we distributed and organized the
