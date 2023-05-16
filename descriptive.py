@@ -16,12 +16,9 @@ University of St. Gallen.
 # =============================================================================
 # Packages
 # =============================================================================
-import sys
-import os
 import pandas as pd
-import numpy as np
 
-import functions as ss_fcts
+from microeconometrics.src.microeconometrics import descriptive as ss_fcts
 
 # =============================================================================
 # Load the data
@@ -103,8 +100,6 @@ for data_set_name in data_sets.keys():
     print(f"Correlation matrix for {data_set_name}:")
     print(corr_matrix_num)
 
-
-import pandas as pd
 import ss_fcts
 
 # create an empty dictionary to store correlation matrices
