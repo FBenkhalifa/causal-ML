@@ -185,7 +185,7 @@ def hists_combined(data_sets):
 # additional for plotting all histograms on one pane
 # used for illustration in the paper, same results as previuos function
 
-def hists_combi_one_pane(data_sets):
+def hists_combi_one_pane(data_sets, num_cols = 4):
     '''
     Plots histograms of continuous variables with more than two unique values 
     for multiple datasets on one single pane.
@@ -207,11 +207,10 @@ def hists_combi_one_pane(data_sets):
     
     # calculate the number of rows and columns for the subplots
     num_plots = len(cols_to_plot)
-    num_rows = int(np.ceil(np.sqrt(num_plots)))
-    num_cols = int(np.ceil(num_plots/num_rows))
+    num_rows = int(np.ceil(num_plots / num_cols))
     
     # create the subplots
-    fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(num_cols*5, num_rows*5))
+    fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(num_cols * 5, num_rows * 5))
     
     # flatten the axes array for easier indexing
     axes = axes.flatten()
@@ -235,8 +234,6 @@ def hists_combi_one_pane(data_sets):
     
     # show the plot
     plt.show()
-
-
 
 # =============================================================================
 # Correlation matrix
@@ -274,26 +271,3 @@ def corr_matrix(data):
     
     # return the completed correlation DataFrame
     return corr_df
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
