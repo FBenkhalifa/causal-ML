@@ -2,7 +2,7 @@ import os
 from typing import List, Tuple, Any
 
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from pandas import DataFrame
 from sklearn.model_selection import train_test_split
@@ -19,6 +19,8 @@ from geopy.geocoders import Nominatim
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.linear_model import LassoCV
 from scipy.stats import zscore
+
+
 # 0. FUNCTIONS ---------------------------------------------------------------------------------------
 def to_miliseconds(x: List[str]) -> float:
     """Converts the run_time into miliseconds."""
@@ -95,6 +97,45 @@ def convert_bib_to_start_list(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+def assign_season(date: datetime) -> str:
+    """Assigns the season to a date."""
+    if date.month >= 10:
+        season = f"{date.year}_{date.year + 1}"
+    elif date.month <= 3:
+        season = f"{date.year - 1}_{date.year}"
+    else:
+        season = None  # or assign a value for dates outside the ski season
+    return season
+
+
+def missing_values_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Creates a summary of missing values in a dataframe."""
+    df = df.copy()
+    run_time = df.pop("run_time")
+    z_score = df.pop("z_score")
+    missing = df.isnull().sum()
+    missing_percent = df.isnull().mean() * 100
+
+    # Create a dataframe to hold missing value indicators
+    df_missing = df.isnull().astype(int)
+
+    # Calculate correlation of missing indicators with outcome
+    run_time_corr = df_missing.assign(outcome=run_time).corr()["outcome"]
+    z_score_corr = df_missing.assign(outcome=z_score).corr()["outcome"]
+
+    missing_df = pd.DataFrame(
+        {
+            "Missing Values": missing,
+            "Missing (%)": missing_percent,
+            "Corr(Missing = 1, run_time)": run_time_corr,
+            "Corr(Missing = 1, z_score)": z_score_corr,
+        }
+    )
+
+    # Sort by the number of missing values
+    missing_df = missing_df.sort_values(by="Missing Values", ascending=False)
+    return missing_df
+
 
 # relative strenghts
 # seasonal_relative_strengths
@@ -112,14 +153,16 @@ def assign_wcp_accumulated(
     if additional_group_vars is not None:
         group_vars.extend(additional_group_vars)
 
-    col_accumulated = f'{col_prefix}_accumulated'
-    col_relative_rank = f'{col_prefix}_relative_rank_on_race'
+    col_accumulated = f"{col_prefix}_accumulated"
+    col_relative_rank = f"{col_prefix}_relative_rank_on_race"
 
     for _, grouped_df in df.groupby(group_vars):
         grouped_df = grouped_df.sort_values(["date", "run"])
-        df.loc[grouped_df.index, col_accumulated] = grouped_df[target].fillna(0).cumsum().shift(1).fillna(0)
+        df.loc[grouped_df.index, col_accumulated] = (
+            grouped_df[target].fillna(0).cumsum().shift(1).fillna(0)
+        )
 
-    df[col_relative_rank] = df.groupby('race_id')[col_accumulated].rank(ascending=False)
+    df[col_relative_rank] = df.groupby("race_id")[col_accumulated].rank(ascending=False)
     return df
 
 
@@ -156,7 +199,12 @@ def retrieve_distance_to_tournament(
     if from_disk and os.path.isfile(file_path):
         logging.warning(f"Retrieving distance_to_tournament from disk.")
         # If there is, load it
-        df_distance_map = pd.read_parquet("data/distance_to_tournament.parquet", engine="fastparquet")
+        df_distance_map = pd.read_parquet(
+            "data/distance_to_tournament.parquet", engine="fastparquet"
+        )
+        df_distance_map["distance_to_tournament"] = (
+            df_distance_map["distance_to_tournament"] / 1000
+        )
 
         # Join by country, location and add distance_to_tournament as new variable
         return data.merge(
@@ -253,11 +301,13 @@ def detect_multicollinearity(df: pd.DataFrame, threshold=0.8, target=None):
     for i in range(len(corr_matrix.columns)):
         for j in range(i + 1, len(corr_matrix.columns)):
             if corr_matrix.iloc[i, j] >= threshold:
-                multicoll_pairs.append(dict(
+                multicoll_pairs.append(
+                    dict(
                         var_1=corr_matrix.columns[i],
                         var_2=corr_matrix.columns[j],
                         corr=corr_matrix.iloc[i, j],
-                    ))
+                    )
+                )
 
     # Compute Point-Biserial correlation for numeric-categorical pairs
     num_features = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -287,7 +337,9 @@ def detect_multicollinearity(df: pd.DataFrame, threshold=0.8, target=None):
 
 
 class DoubleSelection(BaseEstimator, TransformerMixin):
-    def __init__(self,  target: str,  treatment: str, alpha=0.0, controls: List[str]=None):
+    def __init__(
+        self, target: str, treatment: str, alpha=0.0, controls: List[str] = None
+    ):
         self.alpha = alpha
         self.controls = controls if controls else []
         self.target = target
@@ -310,6 +362,7 @@ class DoubleSelection(BaseEstimator, TransformerMixin):
 
         # Collect the variables
         self._columns = X.columns
+
     @property
     def selected_variables(self) -> pd.Index:
         selected_y = np.abs(self._lasso_y.coef_) > self.alpha
@@ -317,15 +370,14 @@ class DoubleSelection(BaseEstimator, TransformerMixin):
         selected = np.logical_or(selected_y, selected_z)
         return self._columns[selected].union(self.controls + [self.treatment])
 
-    def transform(self, X:pd.DataFrame) -> tuple[DataFrame, Any]:
+    def transform(self, X: pd.DataFrame) -> tuple[DataFrame, Any]:
         X = X.copy()
         y = X.pop(self.target)
         return X.filter(self.selected_variables), y
 
 
 class FixedEffectsPreprocessor(BaseEstimator, TransformerMixin):
-    def __init__(self, entity_var='name', time_var='date'):
-
+    def __init__(self, entity_var="name", time_var="date"):
         self.entity_var = entity_var
         self.time_var = time_var
         self.entity_means = None
@@ -341,20 +393,19 @@ class FixedEffectsPreprocessor(BaseEstimator, TransformerMixin):
         # Demean the data
         X = X.copy().set_index([self.entity_var, self.time_var])
         X = pd.get_dummies(X, drop_first=True, dtype=int)
-        X_demeaned = X - X.groupby(level=self.entity_var).transform('mean')
+        X_demeaned = X - X.groupby(level=self.entity_var).transform("mean")
         return X_demeaned
 
 
-
-def _add_shadow_variable(X: pd.DataFrame):
-    """For each variable in the dataset, adds a shadow variable that indicates whether the value is missing."""
+def add_missing_indicator(X: pd.DataFrame) -> pd.DataFrame:
+    """For each variable in the dataset, adds an indicator whether the value is missing."""
     # Check in each column if there is a missing value
     # Make empty dataframe
-    X = X.copy()
+    missing_df = pd.DataFrame()
     for col in X.columns:
         if X[col].isna().any():
-            X[f"shadow_{col}"] = X[col].isna().astype(int)
-    return X
+            missing_df[f"missing_{col}"] = X[col].isna().astype(int)
+    return missing_df
 
 
 def extract_treatment_effect(model):
@@ -391,7 +442,11 @@ def simulate_treatment_effect(
         return row[target]
 
     for group, df in tqdm(
-        list(data.dropna(subset=["date", "gender", "details_competition_type"]).groupby(["date", "gender", "details_competition_type"]))
+        list(
+            data.dropna(subset=["date", "gender", "details_competition_type"]).groupby(
+                ["date", "gender", "details_competition_type"]
+            )
+        )
     ):
         for index, row in df.iterrows():
             if row.treatment:
@@ -402,13 +457,17 @@ def simulate_treatment_effect(
             else:
                 treatment_nat = row.country
                 # Get the adjusted run times
-            simulated_run_times = df.drop(index=index).apply(lambda x: _maybe_add_or_remove_treatment_effect(x, treatment_nat), axis=1)
-            simulated_athlete_run_time = _maybe_add_or_remove_treatment_effect(row, treatment_nat)
+            simulated_run_times = df.drop(index=index).apply(
+                lambda x: _maybe_add_or_remove_treatment_effect(x, treatment_nat),
+                axis=1,
+            )
+            simulated_athlete_run_time = _maybe_add_or_remove_treatment_effect(
+                row, treatment_nat
+            )
 
             new_row = dict(
                 rank_before=(df.drop(index=index).run_time < row.run_time).sum() + 1,
-                rank_after=(simulated_run_times < simulated_athlete_run_time).sum()
-                + 1,
+                rank_after=(simulated_run_times < simulated_athlete_run_time).sum() + 1,
                 name=row["name"],
                 date=row.date,
                 gender=row.gender,
@@ -418,6 +477,8 @@ def simulate_treatment_effect(
             )
             # Append to rank_df
             rank_df.append(new_row)
-    return pd.DataFrame.from_records(rank_df).assign(rank_change=lambda x: x.rank_after - x.rank_before).set_index(
-        ["name", "date"]
+    return (
+        pd.DataFrame.from_records(rank_df)
+        .assign(rank_change=lambda x: x.rank_after - x.rank_before)
+        .set_index(["name", "date"])
     )
