@@ -18,7 +18,7 @@ University of St. Gallen.
 # =============================================================================
 import pandas as pd
 
-from microeconometrics.src.microeconometrics import descriptive as ss_fcts
+from microeconometrics import descriptive as ss_fcts
 
 # =============================================================================
 # Load the data
