@@ -198,6 +198,8 @@ data["rolling_mean_rank_last_30_days"] = (
 data["coursesetter_count"] = data.groupby("coursesetter").cumcount()
 # Get the distance to the tournament according to the home country of the athlete
 data = prep.retrieve_distance_to_tournament(data)
+data["distance_to_tournament"] = data["distance_to_tournament"] / 100
+
 # Repeat for the discipline wpc points
 wpc_last_nat_discipline = (
     data.groupby(["season", "country", "gender", "details_competition_type"])

@@ -202,9 +202,6 @@ def retrieve_distance_to_tournament(
         df_distance_map = pd.read_parquet(
             "data/distance_to_tournament.parquet", engine="fastparquet"
         )
-        df_distance_map["distance_to_tournament"] = (
-            df_distance_map["distance_to_tournament"] / 1000
-        )
 
         # Join by country, location and add distance_to_tournament as new variable
         return data.merge(
