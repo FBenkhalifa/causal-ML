@@ -64,5 +64,3 @@ merged.groupby([ 'coursesetter']).z_score_diff.mean().plot.kde()
 cat_features = data.select_dtypes(include=["object", "category"]).columns
 data = pd.get_dummies(data, columns=cat_features, drop_first=True, dtype=int)
 panel_data = data.groupby(['name', 'date']).transform(lambda x: (x - x.mean())/ x.std())
-
-fixed_effects = FixedEffectsPreprocessor(entity_var='name', time_var='date')

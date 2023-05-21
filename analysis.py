@@ -92,8 +92,7 @@ data.loc[mask_female, "gender"] = "Female"
 print(data.loc[mask_male, "name"].unique())
 print(data.loc[mask_female, "name"].unique())
 
-
-# Make id by concatenating the columns as string 'details_competition_type', 'gender', 'date', 'location', 'country'
+# Make unique race id
 data["race_id"] = data[
     [
         "details_competition_type",
@@ -104,7 +103,6 @@ data["race_id"] = data[
         "number_of_gates",
     ]
 ].apply(lambda row: "_".join(row.values.astype(str)), axis=1)
-data["race_id"].nunique()
 
 # 1.3. Duplicated values ----------------------------------------------------------
 duplicated = data.duplicated(subset=["name", "date", "start_time"], keep=False)
@@ -123,7 +121,7 @@ duplicated_df = (
     ]
     .head(6)
 )
-print(duplicated_df.astype(str).to_latex(escape=True, index=False))
+# print(duplicated_df.astype(str).to_latex(escape=True, index=False))
 
 # Fix season
 data["season"] = data["date"].apply(prep.assign_season)
@@ -244,16 +242,15 @@ missing_summary = prep.missing_values_summary(
         ),
     ]
 )
-print(
-    missing_summary[missing_summary.iloc[:, 1] > 0].to_latex(
-        escape=True, float_format="%.2f"
-    )
-)
+# print(
+#     missing_summary[missing_summary.iloc[:, 1] > 0].to_latex(
+#         escape=True, float_format="%.2f"
+#     )
+# )
 
 # Detect multicollinearity
-# multi_col = prep.detect_multicollinearity(df=data, threshold=0.8, target="run_time")
-# print("Detect features with a correlation higher than 0.8: ")
-# print(multi_col)
+multi_col = prep.detect_multicollinearity(df=data, threshold=0.8, target="run_time")
+print(multi_col)
 
 # Selected features
 features = [
