@@ -1,8 +1,10 @@
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 import pandas as pd
 from datetime import timedelta
+
+from pandas import DataFrame
 from sklearn.model_selection import train_test_split
 import statsmodels.api as sm
 import numpy as np
@@ -14,7 +16,9 @@ import pycountry
 from tqdm import tqdm
 import geopy.distance
 from geopy.geocoders import Nominatim
-
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.linear_model import LassoCV
+from scipy.stats import zscore
 # 0. FUNCTIONS ---------------------------------------------------------------------------------------
 def to_miliseconds(x: List[str]) -> float:
     """Converts the run_time into miliseconds."""
@@ -91,39 +95,45 @@ def convert_bib_to_start_list(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
-def _compute_acc_wpc(group: pd.DataFrame, name: str):
-    group = group.sort_values(["date", "run"])
-    group[name] = group["wpc"].fillna(0).cumsum().shift(1).fillna(0)
-    return group
 
-
+# relative strenghts
+# seasonal_relative_strengths
+# lifetime_relative_strengths
 def assign_wcp_accumulated(
-    df: pd.DataFrame, new_col: str, additional_group: str = None
+    df: pd.DataFrame,
+    target: str,
+    col_prefix: str,
+    additional_group_vars: str = ["season"],
 ) -> pd.DataFrame:
     """Computes the accumulated world cup points for an athlete per season (and an additional group)."""
-    group = ["name", "season"]
+    group_vars = ["name"]
+
     # Add the additional group if specified
-    if additional_group is not None:
-        group.append(additional_group)
-    # print(df.assign(acc_wpc=acc_wpc)[["name", "wpc", "acc_wpc", "date", "run"]])
-    return (
-        df.groupby(group)
-        .apply(lambda df: _compute_acc_wpc(df, new_col))
-        .reset_index(drop=True)
-    )
+    if additional_group_vars is not None:
+        group_vars.extend(additional_group_vars)
+
+    col_accumulated = f'{col_prefix}_accumulated'
+    col_relative_rank = f'{col_prefix}_relative_rank_on_race'
+
+    for _, grouped_df in df.groupby(group_vars):
+        grouped_df = grouped_df.sort_values(["date", "run"])
+        df.loc[grouped_df.index, col_accumulated] = grouped_df[target].fillna(0).cumsum().shift(1).fillna(0)
+
+    df[col_relative_rank] = df.groupby('race_id')[col_accumulated].rank(ascending=False)
+    return df
 
 
-def rolling_mean_rank_last_month(group) -> pd.DataFrame:
+def rolling_mean_rank_last_month(group, days: int) -> pd.DataFrame:
     """Computes mean rankings of the athlete in the last month since an event."""
     rolling_mean = []
     for i, row in group.iterrows():
-        one_month_ago = row["date"] - timedelta(days=30)
+        one_month_ago = row["date"] - timedelta(days=days)
         last_month_rows = group[
             (group["date"] >= one_month_ago)
             & (group["date"] <= (row["date"] - timedelta(days=1)))
         ]
         rolling_mean.append(last_month_rows["rank"].mean())
-    group["rolling_mean_rank"] = rolling_mean
+    group[f"rolling_mean_rank_last_{days}_days"] = rolling_mean
     return group
 
 
@@ -276,98 +286,64 @@ def detect_multicollinearity(df: pd.DataFrame, threshold=0.8, target=None):
     return pd.DataFrame.from_records(multicoll_pairs).assign(threshold=threshold)
 
 
-def _revert_target_encoding(
-    data_original,
-    data_transformed,
-    target,
-    encoded_columns,
-    tol=0.1,
-):
-    data_reverted = data_transformed.copy()
-    data_original_with_target = data_original.assign(target=target)
+class DoubleSelection(BaseEstimator, TransformerMixin):
+    def __init__(self,  target: str,  treatment: str, alpha=0.0, controls: List[str]=None):
+        self.alpha = alpha
+        self.controls = controls if controls else []
+        self.target = target
+        self.treatment = treatment
+        self._lasso_y = None
+        self._lasso_z = None
 
-    for column in encoded_columns:
-        original_column = data_original[column]
-        target_column = data_transformed[column]
-        class_means = data_original_with_target.groupby(column)["target"].mean()
+        self._columns = None
 
-        for cls, mean in class_means.to_dict().items():
-            data_reverted.loc[np.abs(target_column - mean) <= tol, column] = cls
+    def fit(self, X: pd.DataFrame, y=None) -> None:
+        X = X.copy()
+        y = X.pop(self.target)
+        d = X.pop(self.treatment)
 
-    return data_reverted
+        # Step 1: Lasso regression of y on X
+        self._lasso_y = LassoCV(cv=5, random_state=13).fit(X, y)
 
+        # Step 2: Lasso regression of Z on X
+        self._lasso_z = LassoCV(cv=5, random_state=13).fit(X, d)
 
-from sklearn.linear_model import LassoCV
+        # Collect the variables
+        self._columns = X.columns
+    @property
+    def selected_variables(self) -> pd.Index:
+        selected_y = np.abs(self._lasso_y.coef_) > self.alpha
+        selected_z = np.abs(self._lasso_z.coef_) > self.alpha
+        selected = np.logical_or(selected_y, selected_z)
+        return self._columns[selected].union(self.controls + [self.treatment])
 
-
-def _post_lasso(X: pd.DataFrame, y: pd.Series) -> pd.Series:
-    """Get the features selected by the lasso model."""
-    X = X.copy()
-    y = y.copy()
-    # Fit the lasso model
-    lasso = LassoCV(cv=5, random_state=42).fit(X, y)
-    # Get the coefficients
-    coef = lasso.coef_
-    return pd.Series(coef[coef != 0], index=X.columns[coef != 0])
-
-
-def _encode_categorical(X, **kwargs):
-    """Encodes categorical features and adds a constant column."""
-    cat_features = X.select_dtypes(include=["object", "category"]).columns
-    X = pd.get_dummies(X, columns=cat_features, **kwargs)
-    X = sm.add_constant(X)
-    # Make sure that columns do not contain spaces
-    X.columns = [col.replace(" ", "_") for col in X.columns]
-    return X
+    def transform(self, X:pd.DataFrame) -> tuple[DataFrame, Any]:
+        X = X.copy()
+        y = X.pop(self.target)
+        return X.filter(self.selected_variables), y
 
 
-def _get_features_from_post_lasso(X: pd.DataFrame, y: pd.Series, d="treatment"):
-    """Extracts the union of features left by a lasso regression of (1) the treatment on the covariates and (2) the outcome on the covariates."""
-    # Fit the lasso model on the target
-    non_shrunk_target = _post_lasso(X, y)
-    non_shrunk_treatment = _post_lasso(X.drop(columns=[d]), X[d])
-    non_shrunk = pd.concat([non_shrunk_target, non_shrunk_treatment, pd.Series({d: np.nan})], axis=0).index.unique()
+class FixedEffectsPreprocessor(BaseEstimator, TransformerMixin):
+    def __init__(self, entity_var='name', time_var='date'):
 
-    # Filter out the non-shrunk parameters from the treatment prediction
-    logging.warning(
-        f"Discarding {', '.join(X.columns.difference(non_shrunk).tolist())} from the treatment prediction"
-    )
-    return non_shrunk
+        self.entity_var = entity_var
+        self.time_var = time_var
+        self.entity_means = None
+        self.time_std = None
 
+    def fit(self, X, y=None):
+        # Check if the MultiIndex has the required levels
+        if not {self.entity_var, self.time_var}.issubset(X.columns):
+            raise ValueError("The MultiIndex of X must contain entity and time levels.")
+        return self
 
-def prepare_X_y(
-    data: pd.DataFrame,
-    target: str = "run_time",
-    preprocess_pipe: Pipeline = None,
-    dummy_encode_and_constant: bool = False,
-    add_shadow_features: bool = False,
-    post_lasso: bool = False,
-) -> Tuple[pd.DataFrame, pd.Series]:
-    """Helper function to preprocess the dataset."""
-    X = data.copy().dropna(subset=[target]).set_index(["name", "date"])
-    y = X.pop(target)
+    def transform(self, X, y=None):
+        # Demean the data
+        X = X.copy().set_index([self.entity_var, self.time_var])
+        X = pd.get_dummies(X, drop_first=True, dtype=int)
+        X_demeaned = X - X.groupby(level=self.entity_var).transform('mean')
+        return X_demeaned
 
-    if dummy_encode_and_constant:
-        X = _encode_categorical(X, drop_first=True)
-
-    if add_shadow_features:
-        X = _add_shadow_variable(X)
-
-    if post_lasso:
-        X_one_hot = _encode_categorical(X, drop_first=False)
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_one_hot, y, test_size=0.5, random_state=13
-        )
-        X_preprocessed = pd.DataFrame(
-            preprocess_pipe.fit_transform(X_train, y_train),
-            columns=X_train.columns,
-            index=X_train.index,
-        )
-        features = _get_features_from_post_lasso(X=X_preprocessed, y=y_train)
-        X = X_test[features]
-        y = y_test
-
-    return X, y
 
 
 def _add_shadow_variable(X: pd.DataFrame):
