@@ -11,6 +11,7 @@ from sklearn.impute import IterativeImputer
 import logging
 from sklearn.linear_model import BayesianRidge
 from microeconometrics import preprocessing as prep
+from statsmodels import api as sm
 
 np.random.seed(13)
 
@@ -278,7 +279,9 @@ features = [
     "wcp_relative_to_field",
     "discipline_wcp_relative_to_field",
     # "coursesetter_count",
-    "rolling_mean_rank_last_30_days",
+    "rank_mean_last_15_days",
+    # "rank_mean_last_30_days",
+    "rank_mean_last_60_days",
     # "gate_per_vertical_meter",
     "acc_country_wpc_discipline",
     "distance_to_tournament",  # Accounts for proximity advantages
@@ -303,6 +306,7 @@ features = [
     # "acc_wpc",   # In favor of acc_discipline_wpc
     # "acc_country_wpc",  # In favor of acc_country_wpc_discipline
 ]
+
 data.groupby("race_id")[["run_time", "z_score"]].describe().describe().stack(
     level=0
 ).unstack(level=0).round()
@@ -317,7 +321,7 @@ data_imputed = pd.get_dummies(data_imputed, drop_first=False, dtype=int)
 data_imputed.columns = data_imputed.columns.str.replace(" ", "_")
 
 data_imputed_matrix = IterativeImputer(
-    estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=3
+    estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=2
 ).fit_transform(X=data_imputed)
 data_imputed = pd.DataFrame(
     data_imputed_matrix, columns=data_imputed.columns, index=data_imputed.index
@@ -333,7 +337,6 @@ target = "z_score"
 # 3.1 OLS model -----------------------------------------------------------------
 data_ols = data_imputed.copy()
 
-from statsmodels import api as sm
 
 ols = sm.OLS(
     exog=sm.add_constant(data_ols.drop(target, axis=1)), endog=data_ols[target]
@@ -379,10 +382,11 @@ data_container = DoubleMLData(
 double_ml = DoubleMLPLR(
     data_container,
     CatBoostRegressor(),
-    CatBoostRegressor(),
+    CatBoostClassifier(),
 )
 double_ml.fit()
 print(double_ml)
+
 
 # Out-of-sample Performance:
 # Learner ml_l RMSE: [[0.69205823]]
