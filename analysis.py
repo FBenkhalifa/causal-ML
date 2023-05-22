@@ -1,3 +1,5 @@
+import datetime
+
 import pandas as pd
 from doubleml import DoubleMLPLR
 from catboost import CatBoostRegressor, CatBoostClassifier
@@ -26,15 +28,21 @@ data = data_raw.copy()
 data.dropna(subset=["run_time"])
 
 # 1. FEATUREs ------------------------------------------------------
+
+data["run_time"] = pd.to_datetime(
+    data["run_time"], format="%M:%S.%f", errors="coerce"
+) - datetime.datetime(1900, 1, 1)
+data["run_time"] = data["run_time"].dt.total_seconds() * 1_000
+
+
 # 1.1 Transformations
-data["run_time"] = data.run_time.str.split(":|\.").apply(prep.to_miliseconds) / 1000
 data.dropna(subset=["run_time"], inplace=True)
 data["date"] = pd.to_datetime(data["date"])
 data["start_time"] = data["start_time"].apply(prep.time_string_to_minutes)
 
 data_raw.wpc.isna().mean()
 data_raw.run_time.isna().mean()
-data_raw['rank'].isna().mean()
+data_raw["rank"].isna().mean()
 
 # 1.2 Inconsistencies
 # Harmonize the names of the coursesetters
@@ -184,22 +192,17 @@ data = prep.assign_wcp_accumulated(
     additional_group_vars=["details_competition_type", "season"],
 )  # wpc per discipline
 
+
 # Form features
-data = (
-    data.sort_values(["name", "date"])
-    .groupby("name", group_keys=False)
-    .apply(lambda df: prep.rolling_mean_rank_last_month(df, 30))
-)
-# Forward fill the rolling mean rank
-data["rolling_mean_rank_last_30_days"] = (
-    data.sort_values(["name", "date"])
-    .groupby("name")[["rolling_mean_rank_last_30_days"]]
-    .fillna(method="ffill")
-)
+for lag in [15, 30, 60]:
+    data = (
+        data.sort_values(["name", "date"])
+        .groupby("name", group_keys=False)
+        .apply(lambda df: prep.rolling_mean_last_n_days(df, "rank", lag))
+    )
 
 #  2.1 Coach specific features (influence on the treatment) ---------------
-# Assign the cumulative count a coursesetter has been appointed
-data["coursesetter_count"] = data.groupby("coursesetter").cumcount()
+
 # Get the distance to the tournament according to the home country of the athlete
 data = prep.retrieve_distance_to_tournament(data)
 data["distance_to_tournament"] = data["distance_to_tournament"] / 100
@@ -221,13 +224,6 @@ wpc_last_nat_discipline = (
 data = data.merge(wpc_last_nat_discipline, how="left")
 
 # 1.3 Tournament specific features -----------------------------------------------------
-# Measure how mature the season is, this might have general effects on the performance, motivation etc., importance
-for group, df in data.groupby(["season", "gender"]):
-    season_start = df.date.min()
-    data.loc[df.index, "day_since_season_start"] = (df.date - season_start).dt.days
-
-# 1.4 Course specifics ---------------------------------------------------------
-data["gate_per_vertical_meter"] = data["number_of_gates"] / data["vertical_drop"]
 data.to_csv("data/data_preprocessed.csv", index=False)
 
 # 2. Missing values ------------------------------------------------------------
@@ -262,18 +258,18 @@ print(multi_col)
 features = [
     # "run_time",  # Outcome
     "z_score",
-    "details_competition_type",  # Important because indicates the discipline
+    # "details_competition_type",  # Important because indicates the discipline
     "date",
-    "start_altitude",  # Stays in favor of finish_altitude, high correlation
+    # "start_altitude",  # Stays in favor of finish_altitude, high correlation
     # "vertical_drop",  # Very high correlation with run_time
-    "number_of_gates",  # Very high correlation, since it determines how fast one slits through the gates
+    # "number_of_gates",  # Very high correlation, since it determines how fast one slits through the gates
     "start_time",  # Should be left, to incorporate time effects during one dqy
     "name",
-    "season",
+    # "season",
     "age",  # Stays in favor of birthdate
-    "gender",  # Makes difference
-    "run",  # High correlation with treatment indicating that the 'cut/prefiltering' only allows the best athletes to run
-    "location",  # Accounts for general characteristics of the location
+    # "gender",  # Makes difference
+    # "run",  # High correlation with treatment indicating that the 'cut/prefiltering' only allows the best athletes to run
+    # "location",  # Accounts for general characteristics of the location
     "total_wcp_nat_last",  # High correlation with treatment
     "treatment",
     "approx_world_cup_start_list",
@@ -281,12 +277,12 @@ features = [
     # "total_wcp_discipline_nat_last",
     "wcp_relative_to_field",
     "discipline_wcp_relative_to_field",
-    "coursesetter_count",
+    # "coursesetter_count",
     "rolling_mean_rank_last_30_days",
-    "gate_per_vertical_meter",
+    # "gate_per_vertical_meter",
     "acc_country_wpc_discipline",
     "distance_to_tournament",  # Accounts for proximity advantages
-    "day_since_season_start",  # In favor of acc_country_wpc
+    # "day_since_season_start",  # In favor of acc_country_wpc
     # "finish_altitude", # In favor of finish altitude
     # "lenght",  # Very high correlation with run_time but many NAs (consider binning)
     # "rolling_mean_rank",  # Current form of athlete
@@ -307,13 +303,16 @@ features = [
     # "acc_wpc",   # In favor of acc_discipline_wpc
     # "acc_country_wpc",  # In favor of acc_country_wpc_discipline
 ]
-data.groupby('race_id')[['run_time', 'z_score']].describe().describe().stack(level=0).unstack(level=0).round()
-df = data.groupby('race_id')[['run_time', 'z_score']].describe().describe()
+data.groupby("race_id")[["run_time", "z_score"]].describe().describe().stack(
+    level=0
+).unstack(level=0).round()
+df = data.groupby("race_id")[["run_time", "z_score"]].describe().describe()
 df = df.swaplevel(axis=1).sort_index(axis=1)
 
 
 # 2.1 Imputation -------
-data_imputed = data.copy().set_index(["name", "date"]).filter(features)
+data_selected = data.copy().set_index(["name", "date"]).filter(features)
+data_imputed = data_selected.copy()
 data_imputed = pd.get_dummies(data_imputed, drop_first=False, dtype=int)
 data_imputed.columns = data_imputed.columns.str.replace(" ", "_")
 
@@ -323,6 +322,9 @@ data_imputed_matrix = IterativeImputer(
 data_imputed = pd.DataFrame(
     data_imputed_matrix, columns=data_imputed.columns, index=data_imputed.index
 )
+
+data_imputed["start_time"]
+
 # data_imputed = pd.read_csv("data/data_imputed.csv")
 
 # 3. MODELLING ------------------------------------------------------------------
@@ -331,50 +333,31 @@ target = "z_score"
 # 3.1 OLS model -----------------------------------------------------------------
 data_ols = data_imputed.copy()
 
-# Feature selection
-ols_selector = prep.DoubleSelection(
-    target=target, treatment="treatment", alpha=0, controls=["total_wcp_nat_last"]
-)
-ols_selector.fit(X=data_ols)
-X_ols, y_ols = ols_selector.transform(X=data_ols)
-X_ols.assign(**{target: y_ols}).reset_index().to_csv("data/ols_data.csv", index=False)
-X_ols_corr = (
-    X_ols.assign(**{target: y_ols}).reset_index().select_dtypes(include="number").corr()
-)
-print(X_ols_corr)
+from statsmodels import api as sm
 
-# OLS model
-formula = f"{target} ~  {' + '.join(X_ols.columns)}"
-ols = smf.ols(formula=formula, data=X_ols.assign(**{target: y_ols})).fit()
-print(ols.summary())
+ols = sm.OLS(
+    exog=sm.add_constant(data_ols.drop(target, axis=1)), endog=data_ols[target]
+)
+ols_fit = ols.fit()
+ols_fit.summary()
 
 # 3,3 Panel data ------------------------------------------------------
 data_panel = data_imputed.copy()
+cols_to_drop = list(data_imputed.filter(regex="country|skis").columns)
+data_panel = data_panel.drop(columns=cols_to_drop)
+
+data_panel = pd.get_dummies(data_panel, drop_first=False, dtype=int)
 
 # Conduct within transformation
 data_panel = prep.FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
 
-# Feature selection
-panel_selector = prep.DoubleSelection(
-    target=target, treatment="treatment", alpha=0, controls=["total_wcp_nat_last"]
-)
-panel_selector.fit(X=data_panel)
-X_panel, y_panel = panel_selector.transform(X=data_panel)
-X_panel.assign(**{target: y_panel}).reset_index().to_csv(
-    "data/panel_data.csv", index=False
-)
-X_panel_corr = (
-    X_panel.assign(**{target: y_panel})
-    .reset_index()
-    .select_dtypes(include="number")
-    .corr()
-)
-print(X_panel_corr)
-
 # Fixed effects model
-formula = f"{target} ~  {' + '.join(X_panel.columns)}"
-fe_ols = smf.ols(formula=formula, data=X_panel.assign(**{target: y_panel})).fit()
-print(fe_ols.summary())
+ols = sm.OLS(
+    exog=sm.add_constant(data_panel.drop(target, axis=1)), endog=data_panel[target]
+)
+ols_fit = ols.fit()
+ols_fit.summary()
+
 
 # 3.4 PLR --------------------------------------------------------------
 data_plr = data_imputed.copy()
@@ -396,7 +379,7 @@ data_container = DoubleMLData(
 double_ml = DoubleMLPLR(
     data_container,
     CatBoostRegressor(),
-    CatBoostClassifier(),
+    CatBoostRegressor(),
 )
 double_ml.fit()
 print(double_ml)

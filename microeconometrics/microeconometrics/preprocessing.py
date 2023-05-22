@@ -166,8 +166,9 @@ def assign_wcp_accumulated(
     return df
 
 
-def rolling_mean_rank_last_month(group, days: int) -> pd.DataFrame:
-    """Computes mean rankings of the athlete in the last month since an event."""
+def rolling_mean_last_n_days(
+    group: pd.DataFrame, mean_var: str, days: int
+) -> pd.DataFrame:
     rolling_mean = []
     for i, row in group.iterrows():
         one_month_ago = row["date"] - timedelta(days=days)
@@ -175,8 +176,9 @@ def rolling_mean_rank_last_month(group, days: int) -> pd.DataFrame:
             (group["date"] >= one_month_ago)
             & (group["date"] <= (row["date"] - timedelta(days=1)))
         ]
-        rolling_mean.append(last_month_rows["rank"].mean())
-    group[f"rolling_mean_rank_last_{days}_days"] = rolling_mean
+        rolling_mean.append(last_month_rows[mean_var].mean())
+    group[f"{mean_var}_mean_last_{days}_days"] = rolling_mean
+    group[f"{mean_var}_mean_last_{days}_days"].ffill(inplace=True)
     return group
 
 
