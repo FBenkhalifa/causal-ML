@@ -32,6 +32,10 @@ data.dropna(subset=["run_time"], inplace=True)
 data["date"] = pd.to_datetime(data["date"])
 data["start_time"] = data["start_time"].apply(prep.time_string_to_minutes)
 
+data_raw.wpc.isna().mean()
+data_raw.run_time.isna().mean()
+data_raw['rank'].isna().mean()
+
 # 1.2 Inconsistencies
 # Harmonize the names of the coursesetters
 data["coursesetter"] = data["coursesetter"].replace(
@@ -303,6 +307,10 @@ features = [
     # "acc_wpc",   # In favor of acc_discipline_wpc
     # "acc_country_wpc",  # In favor of acc_country_wpc_discipline
 ]
+data.groupby('race_id')[['run_time', 'z_score']].describe().describe().stack(level=0).unstack(level=0).round()
+df = data.groupby('race_id')[['run_time', 'z_score']].describe().describe()
+df = df.swaplevel(axis=1).sort_index(axis=1)
+
 
 # 2.1 Imputation -------
 data_imputed = data.copy().set_index(["name", "date"]).filter(features)
