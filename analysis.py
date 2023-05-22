@@ -344,11 +344,11 @@ data_panel = prepare_data(
 data_panel = prep.FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
 
 # Fixed effects model
-ols = sm.OLS(
+ols_panel = sm.OLS(
     exog=sm.add_constant(data_panel.drop(target, axis=1)), endog=data_panel[target]
 )
-ols_fit = ols.fit()
-ols_fit.summary()
+ols_panel_fit = ols_panel.fit()
+ols_panel_fit.summary()
 
 
 # 3.4 PLR --------------------------------------------------------------
