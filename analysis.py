@@ -4,7 +4,6 @@ import pandas as pd
 from doubleml import DoubleMLPLR
 from catboost import CatBoostRegressor, CatBoostClassifier
 from doubleml import DoubleMLData
-import statsmodels.formula.api as smf
 from sklearn.experimental import enable_iterative_imputer  # noqa
 import numpy as np
 from sklearn.impute import IterativeImputer
@@ -28,22 +27,19 @@ data_raw = pd.read_csv("data/data_group_1.csv", sep=";")
 data = data_raw.copy()
 data.dropna(subset=["run_time"])
 
-# 1. FEATUREs ------------------------------------------------------
+# 1. FEATURES ------------------------------------------------------
 
+# 1.0 Parse the target variable
 data["run_time"] = pd.to_datetime(
     data["run_time"], format="%M:%S.%f", errors="coerce"
 ) - datetime.datetime(1900, 1, 1)
 data["run_time"] = data["run_time"].dt.total_seconds() * 1_000
+data.dropna(subset=["run_time"], inplace=True)
 
 
 # 1.1 Transformations
-data.dropna(subset=["run_time"], inplace=True)
 data["date"] = pd.to_datetime(data["date"])
 data["start_time"] = data["start_time"].apply(prep.time_string_to_minutes)
-
-data_raw.wpc.isna().mean()
-data_raw.run_time.isna().mean()
-data_raw["rank"].isna().mean()
 
 # 1.2 Inconsistencies
 # Harmonize the names of the coursesetters
@@ -102,8 +98,8 @@ data.loc[mask_male, "gender"] = "Male"
 data.loc[mask_female, "gender"] = "Female"
 
 # Quick eyeball check if names seem male and female
-print(data.loc[mask_male, "name"].unique())
-print(data.loc[mask_female, "name"].unique())
+# data[data["gender"] == "Male"]["name"].unique()
+# data[data["gender"] == "Female"]["name"].unique()
 
 # Make unique race id
 data["race_id"] = data[
@@ -202,6 +198,25 @@ for lag in [15, 30, 60]:
         .apply(lambda df: prep.rolling_mean_last_n_days(df, "rank", lag))
     )
 
+data.groupby(["name"])["details_competition_type"].value_counts()
+
+# Add variables measuring experience in this discipline
+data["discipline_count"] = (
+    data.groupby(["name", "details_competition_type"], group_keys=False)[
+        "details_competition_type"
+    ].transform("cumcount")
+    + 1
+)
+
+# Divide by the total number of races the athlete has participated in up until that point
+data["discipline_frac"] = data["discipline_count"] / (
+    data.groupby(["name"], group_keys=False)["details_competition_type"].transform(
+        "cumcount"
+    )
+    + 1
+)
+
+
 #  2.1 Coach specific features (influence on the treatment) ---------------
 
 # Get the distance to the tournament according to the home country of the athlete
@@ -255,79 +270,54 @@ missing_summary = prep.missing_values_summary(
 multi_col = prep.detect_multicollinearity(df=data, threshold=0.8, target="run_time")
 print(multi_col)
 
-# Selected features
-features = [
-    # "run_time",  # Outcome
+features_athletes_variant = [
     "z_score",
-    # "details_competition_type",  # Important because indicates the discipline
-    "date",
-    # "start_altitude",  # Stays in favor of finish_altitude, high correlation
-    # "vertical_drop",  # Very high correlation with run_time
-    # "number_of_gates",  # Very high correlation, since it determines how fast one slits through the gates
     "start_time",  # Should be left, to incorporate time effects during one dqy
-    "name",
-    # "season",
     "age",  # Stays in favor of birthdate
-    # "gender",  # Makes difference
-    # "run",  # High correlation with treatment indicating that the 'cut/prefiltering' only allows the best athletes to run
-    # "location",  # Accounts for general characteristics of the location
     "total_wcp_nat_last",  # High correlation with treatment
     "treatment",
     "approx_world_cup_start_list",
-    "acc_discipline_wpc",
-    # "total_wcp_discipline_nat_last",
-    "wcp_relative_to_field",
-    "discipline_wcp_relative_to_field",
-    # "coursesetter_count",
     "rank_mean_last_15_days",
-    # "rank_mean_last_30_days",
     "rank_mean_last_60_days",
-    # "gate_per_vertical_meter",
-    "acc_country_wpc_discipline",
     "distance_to_tournament",  # Accounts for proximity advantages
-    # "day_since_season_start",  # In favor of acc_country_wpc
-    # "finish_altitude", # In favor of finish altitude
-    # "lenght",  # Very high correlation with run_time but many NAs (consider binning)
-    # "rolling_mean_rank",  # Current form of athlete
-    # "coursesetter",
-    # "coursesetter_nat",  # Might be interesting
-    # "total_rank", # Not pre treatment
-    # "bib", # Indicator oc current form, dropped in favor of acc_wpc
-    "country",  # Stays to account for general strength of country
-    # "total_time", # not pre treatment
-    # "birthdate",
-    "skis",  # Replaced by sponsor
-    # "boots", # Replace by sponsor
-    # "poles", # Replaced by sponsor
-    # "rank", # Pre treatment
-    # "location_country",  # Replaced by distance_to_tournament
-    # "wpc", # Not pre treatment
-    # "wpc_fake", # Not pre treatment
-    # "acc_wpc",   # In favor of acc_discipline_wpc
-    # "acc_country_wpc",  # In favor of acc_country_wpc_discipline
+    "discipline_frac",
+    "discipline_count",
 ]
 
-data.groupby("race_id")[["run_time", "z_score"]].describe().describe().stack(
-    level=0
-).unstack(level=0).round()
-df = data.groupby("race_id")[["run_time", "z_score"]].describe().describe()
-df = df.swaplevel(axis=1).sort_index(axis=1)
+features_athletes_invariant = [
+    "country",  # Stays to account for general strength of country
+    "skis",  # Replaced by sponsor
+]
+
+features_run = [
+    "gender",
+    "number_of_gates",
+    "details_competition_type",
+    "vertical_drop",
+    "season",
+    "gate_per_vertical_meter",
+    "day_since_season_start",
+]
+
+features_athlete_id = ["name", "date"]
+
+from sklearn.impute import SimpleImputer
 
 
-# 2.1 Imputation -------
-data_selected = data.copy().set_index(["name", "date"]).filter(features)
-data_imputed = data_selected.copy()
-data_imputed = pd.get_dummies(data_imputed, drop_first=False, dtype=int)
-data_imputed.columns = data_imputed.columns.str.replace(" ", "_")
+def prepare_data(df):
+    data_imputed = pd.get_dummies(df, drop_first=False, dtype=int)
+    data_imputed.columns = data_imputed.columns.str.replace(" ", "_")
 
-data_imputed_matrix = IterativeImputer(
-    estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=2
-).fit_transform(X=data_imputed)
-data_imputed = pd.DataFrame(
-    data_imputed_matrix, columns=data_imputed.columns, index=data_imputed.index
-)
+    # data_imputed_matrix = IterativeImputer(
+    #     estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=2
+    # ).fit_transform(X=data_imputed)
 
-data_imputed["start_time"]
+    data_imputed_matrix = SimpleImputer(strategy="mean").fit_transform(X=data_imputed)
+    data_imputed = pd.DataFrame(
+        data_imputed_matrix, columns=data_imputed.columns, index=data_imputed.index
+    )
+    return data_imputed
+
 
 # data_imputed = pd.read_csv("data/data_imputed.csv")
 
@@ -335,8 +325,9 @@ data_imputed["start_time"]
 target = "z_score"
 
 # 3.1 OLS model -----------------------------------------------------------------
-data_ols = data_imputed.copy()
-
+data_ols = prepare_data(
+    data.copy().filter(features_athletes_invariant + features_athletes_variant)
+)
 
 ols = sm.OLS(
     exog=sm.add_constant(data_ols.drop(target, axis=1)), endog=data_ols[target]
@@ -345,11 +336,9 @@ ols_fit = ols.fit()
 ols_fit.summary()
 
 # 3,3 Panel data ------------------------------------------------------
-data_panel = data_imputed.copy()
-cols_to_drop = list(data_imputed.filter(regex="country|skis").columns)
-data_panel = data_panel.drop(columns=cols_to_drop)
-
-data_panel = pd.get_dummies(data_panel, drop_first=False, dtype=int)
+data_panel = prepare_data(
+    data.copy().set_index(features_athlete_id).filter(features_athletes_variant)
+)
 
 # Conduct within transformation
 data_panel = prep.FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
@@ -363,22 +352,30 @@ ols_fit.summary()
 
 
 # 3.4 PLR --------------------------------------------------------------
-data_plr = data_imputed.copy()
+data_plr_imputed = prepare_data(
+    data.copy()
+    .set_index(features_athlete_id)
+    .filter(features_athletes_invariant + features_athletes_variant)
+)
+
+data_plr_panel = prep.FixedEffectsPreprocessor().fit_transform(
+    X=data_plr_imputed[features_athletes_variant].reset_index()
+)
+
+# Insert the transformed features
+data_plr = data_plr_imputed.copy()
+data_plr = data_plr.assign(
+    **{col: data_plr_panel[col] for col in data_plr_panel.columns if col != "treatment"}
+)
 
 # Get original treatment variable ()
-d = data_plr.pop("treatment").astype(int)
-data_plr = (
-    prep.FixedEffectsPreprocessor()
-    .fit_transform(X=data_plr.reset_index())
-    .assign(treatment=d)
-    .reset_index(drop=True)
-)
 data_container = DoubleMLData(
     data_plr.reset_index(drop=True),
     y_col=target,
     d_cols="treatment",
     force_all_x_finite="allow-nan",
 )
+
 double_ml = DoubleMLPLR(
     data_container,
     CatBoostRegressor(),
