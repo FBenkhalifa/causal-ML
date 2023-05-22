@@ -8,6 +8,7 @@ library(tidyverse)
 library(hrbrthemes)
 library(viridis)
 library(quantreg)
+
 data <- read_csv('data/data_preprocessed.csv')
 
 data <- data %>%
@@ -35,7 +36,7 @@ filtered_data <- data %>%
 
 race_means <-  filtered_data %>%
   mutate(race_id = factor(race_id, levels = unique(race_id[order(mean_run_time)]))) %>%
-  ggplot( aes(x=race_id, y=run_time, fill=race_id)) +
+  ggplot( aes(x=race_id, y=run_time, fill=gender)) +
     geom_boxplot() +
     scale_fill_viridis(discrete = TRUE, alpha=0.6) +
     geom_jitter(color="black", size=0.4, alpha=0.9) +
