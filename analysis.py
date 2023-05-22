@@ -1,7 +1,7 @@
 import pandas as pd
 from doubleml import DoubleMLDID
 from catboost import CatBoostRegressor, CatBoostClassifier
-from doubleml import DoubleMLData
+from doubleml import DoubleMLData, DoubleMLPLR
 from sklearn.pipeline import make_pipeline
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
@@ -102,7 +102,7 @@ data["location"] = data["location"].str.replace(
 # 2. FEATURE SELECTION -------------------------------------------------------
 # 2.1 Inspect multicollinearity
 # select only numeric features
-correlation_matrix = data.select_dtypes(include='number').corr()
+correlation_matrix = data.select_dtypes(include="number").corr()
 print("Investigate correlation of numeric features: ")
 correlation_matrix
 
@@ -128,25 +128,26 @@ plt.show()
 # Selected features
 features = [
     "run_time",  # Outcome
-    "details_competition_type",  # Important because indicates the discipline
+    # "details_competition_type",  # Important because indicates the discipline
     "date",
-    "start_altitude",  # Stays in favor of finish_altitude, high correlation
-    "vertical_drop",  # Very high correlation with run_time
-    "number_of_gates",  # Very high correlation, since it determines how fast one slits through the gates
+    # "start_altitude",  # Stays in favor of finish_altitude, high correlation
+    # "vertical_drop",  # Very high correlation with run_time
+    # "number_of_gates",  # Very high correlation, since it determines how fast one slits through the gates
     "start_time",  # Should be left, to incorporate time effects during one dqy
     "name",
-    "season",
+    # "season",
     "age",  # Stays in favor of birthdate
-    "gender",  # Makes difference
-    "run",  # High correlation with treatment indicating that the 'cut/prefiltering' only allows the best athletes to run
-    "location",  # Accounts for general characteristics of the location
+    # "gender",  # Makes difference
+    # "run",  # High correlation with treatment indicating that the 'cut/prefiltering' only allows the best athletes to run
+    # "location",  # Accounts for general characteristics of the location
     "total_wcp_nat_last",  # High correlation with treatment
     "treatment",
     "approx_world_cup_start_list",
-    "acc_discipline_wpc",
-    "acc_country_wpc_discipline",
+    "rolling_mean_rank",
+    # "acc_discipline_wpc",
+    # "acc_country_wpc_discipline",
     "distance_to_tournament",  # Accounts for proximity advantages
-    "day_since_season_start",  # In favor of acc_country_wpc
+    # "day_since_season_start",  # In favor of acc_country_wpc
     # "finish_altitude", # In favor of finish altitude
     # "lenght",  # Very high correlation with run_time but many NAs (consider binning)
     # "rolling_mean_rank",  # Current form of athlete
@@ -170,25 +171,37 @@ features = [
 ]
 
 # 3. MODELLING ------------------------------------------------------------------
-target = "run_time"
-pipe = make_pipeline(
-    IterativeImputer(estimator=BayesianRidge(), random_state=0, verbose=2),
-    verbose=True,
 
+target = "run_time"
+
+# Adjust the target variable
+data["run_id"] = (
+    data["date"].astype(str)
+    + data["run"].astype(str)
+    + data["details_competition_type"]
+    + data["number_of_gates"].astype(str)
+    + data["start_altitude"].astype(str)
 )
-X, y = prep.prepare_X_y(
-    data=data[data.columns.intersection(features)],
-    target="run_time",
-    preprocess_pipe=pipe,
-    dummy_encode_and_constant=False,
-    add_shadow_features=True,
-    post_lasso=True,
+std_target = data.groupby("run_id", as_index=False)[target].apply(
+    lambda x: (x - x.mean()) / x.std()
 )
+# get original index
+std_target = std_target.reset_index()
+std_target.set_index("level_1", inplace=True)
+data[target] = std_target[target]
+data.pop("run_id")
+
+X = data[data.columns.intersection(features)].copy()
+X.set_index(["date", "name"], inplace=True)
+y = X.pop(target)
+
+# data["country"].value_counts()
 
 # 3.1 OLS model -----------------------------------------------------------------
-formula = f"{target} ~ " + " + ".join(X.columns)
-ols = smf.ols(formula=formula, data=X.assign(**{target: y})).fit()
+formula = f"target ~ " + " + ".join(X.columns)
+ols = smf.ols(formula=formula, data=X.assign(target=y)).fit()
 print("OLS model: ")
+print(ols.summary())
 print(ols.summary().as_latex())
 
 print("Print as latext version for overleaf:")
@@ -200,9 +213,10 @@ prep.extract_treatment_effect(ols)
 # 3.2 Gamma GLM with log ---------------------------------------------------------
 glm = smf.glm(
     formula=formula,
-    data=X.assign(**{target: y}),
-    family=sm.families.Gamma(link=sm.families.links.log()),
+    data=X.assign(target=y),
+    # family=sm.families.Gamma(),
 ).fit()
+
 print("GLM model: ")
 print(glm.summary())
 
@@ -221,6 +235,9 @@ X_panel, y_panel = prep.prepare_X_y(
     dummy_encode_and_constant=False,
     post_lasso=True,
 )
+y_panel = y.copy()
+X_panel = X.copy()
+
 panel_ols = PanelOLS(
     y_panel,
     X_panel,
@@ -289,19 +306,21 @@ X_double, y_double = prep.prepare_X_y(
     post_lasso=False,
 )
 data_container = DoubleMLData(
-    X_double.assign(**{target: y_double}).reset_index(drop=True),
-    y_col=target,
+    X.assign(target=y).reset_index(drop=True),
+    y_col="target",
     d_cols="treatment",
     force_all_x_finite="allow-nan",
 )
-double_ml = DoubleMLDID(
-    data_container,
-    CatBoostRegressor(),
-    CatBoostClassifier(),
-    seed=1333
+double_ml = DoubleMLPLR(
+    data_container, CatBoostRegressor(), CatBoostClassifier(), n_folds=10, n_rep=5
 )
 double_ml.fit()
 print(double_ml)
+
+# ------------------ Fit summary       ------------------
+#                coef   std err         t     P>|t|     2.5 %    97.5 %
+# treatment -0.058373  0.030424 -1.918623  0.055032 -0.118003  0.001258
+
 
 print(double_ml)
 
@@ -311,8 +330,9 @@ print(double_ml)
 
 # 5. Interpretation ------------------------------------------------------
 # Simulate treatment effect on the whole dataset
-rank_ols = prep.simulate_treatment_effect(data=data,
-                                          treatment_effect=prep.extract_treatment_effect(ols).loc["beta"])
+rank_ols = prep.simulate_treatment_effect(
+    data=data, treatment_effect=prep.extract_treatment_effect(ols).loc["beta"]
+)
 print(
     "Hypothetical changes in the ranking if the treatment would be applied to every athlete in a race"
 )
@@ -337,24 +357,27 @@ plt.show()
 
 plot_data = pd.concat(
     [
-        rank_ols.assign(model='ols'),
-        rank_panel.assign(model='panel-ols'),
-        rank_double_ml.assign(model='double-ml'),
+        rank_ols.assign(model="ols"),
+        rank_panel.assign(model="panel-ols"),
+        rank_double_ml.assign(model="double-ml"),
     ],
     axis=0,
 )
-plot_data['model'] = plot_data.model.values + plot_data.treatment_effect.round(3).str.to_list()
+plot_data["model"] = (
+    plot_data.model.values + plot_data.treatment_effect.round(3).str.to_list()
+)
 # Plot the rank change for each model in one plot
-plot = sns.boxplot(data=plot_data,
-            x='model',
-            y='rank_change',
-            palette='Set3',
-            linewidth=1.2,
-            fliersize=2,
-flierprops=dict(marker='o', markersize=4)
-            )
+plot = sns.boxplot(
+    data=plot_data,
+    x="model",
+    y="rank_change",
+    palette="Set3",
+    linewidth=1.2,
+    fliersize=2,
+    flierprops=dict(marker="o", markersize=4),
+)
 plt.show()
-plot.figure.savefig('plots/rank_change.pdf')
+plot.figure.savefig("plots/rank_change.pdf")
 # Descriptive analysis -------------------------------------------------------
 
 
