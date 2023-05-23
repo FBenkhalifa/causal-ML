@@ -24,7 +24,7 @@ from microeconometrics import descriptive as ss_fcts
 # Load the data
 # =============================================================================
 # load in data using pandas
-data = pd.read_csv('data/data_group_1.csv', sep=";")
+data = pd.read_csv('../../data/data_group_1.csv', sep=";")
 
 
 # =============================================================================

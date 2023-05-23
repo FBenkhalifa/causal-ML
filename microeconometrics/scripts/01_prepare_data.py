@@ -1,35 +1,25 @@
 import datetime
 
 import pandas as pd
-from doubleml import DoubleMLPLR
-from catboost import CatBoostRegressor, CatBoostClassifier
-from doubleml import DoubleMLData
 from sklearn.experimental import enable_iterative_imputer  # noqa
 import numpy as np
 from sklearn.impute import IterativeImputer
 import logging
-from sklearn.linear_model import BayesianRidge
 from microeconometrics import preprocessing as prep
-from statsmodels import api as sm
+from sklearn.linear_model import BayesianRidge
+
 
 np.random.seed(13)
 
-# Configs ------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-pd.set_option("display.max_rows", 500)
-pd.set_option("display.max_columns", 500)
-pd.set_option("display.width", 1000)
 
 # 0. LOAD THE DATA ------------------------------------------------------
 data_raw = pd.read_csv("data/data_group_1.csv", sep=";")
 data = data_raw.copy()
-data.dropna(subset=["run_time"])
 
 # 1. FEATURES ------------------------------------------------------
 
 # 1.0 Parse the target variable
+data.dropna(subset=["run_time"])
 data["run_time"] = pd.to_datetime(
     data["run_time"], format="%M:%S.%f", errors="coerce"
 ) - datetime.datetime(1900, 1, 1)
@@ -115,22 +105,6 @@ data["race_id"] = data[
 
 # 1.3. Duplicated values ----------------------------------------------------------
 duplicated = data.duplicated(subset=["name", "date", "start_time"], keep=False)
-duplicated_df = (
-    data[duplicated]
-    .sort_values(by=["name", "start_time"])[
-        [
-            "name",
-            "date",
-            "start_time",
-            "season",
-            "run",
-            "run_time",
-            "total_wcp_nat_last",
-        ]
-    ]
-    .head(6)
-)
-# print(duplicated_df.astype(str).to_latex(escape=True, index=False))
 
 # Fix season
 data["season"] = data["date"].apply(prep.assign_season)
@@ -162,10 +136,6 @@ total_wcp_nat_last = (
 total_wcp_nat_last = pd.concat([wpc_last_nat, total_wcp_nat_last], axis=0)
 data = data.merge(total_wcp_nat_last, how="left", on=["season", "country", "gender"])
 
-# Eyeball the values
-data.query('country == "AUT"')[
-    ["season", "total_wcp_nat_last_x", "total_wcp_nat_last_y", "country", "gender"]
-].drop_duplicates().sort_values(["season", "gender"])
 data.pop("total_wcp_nat_last_x")
 data.rename(columns={"total_wcp_nat_last_y": "total_wcp_nat_last"}, inplace=True)
 
@@ -176,7 +146,7 @@ data["z_score"] = data.groupby("race_id", group_keys=False).apply(
 )
 
 # 2 Feature engineering--------------------------------------------------
-# 2.1 Athlete specific features --------
+
 # Current form of athlete measured in world cup points
 data = prep.convert_bib_to_start_list(data)
 data = prep.assign_wcp_accumulated(
@@ -216,9 +186,6 @@ data["discipline_frac"] = data["discipline_count"] / (
     + 1
 )
 
-
-#  2.1 Coach specific features (influence on the treatment) ---------------
-
 # Get the distance to the tournament according to the home country of the athlete
 data = prep.retrieve_distance_to_tournament(data)
 data["distance_to_tournament"] = data["distance_to_tournament"] / 100
@@ -239,9 +206,6 @@ wpc_last_nat_discipline = (
 )
 data = data.merge(wpc_last_nat_discipline, how="left")
 
-# 1.3 Tournament specific features -----------------------------------------------------
-data.to_csv("data/data_preprocessed.csv", index=False)
-
 # 2. Missing values ------------------------------------------------------------
 # Filter dataset for columns that are not in to_remove
 missing_summary = prep.missing_values_summary(
@@ -260,15 +224,8 @@ missing_summary = prep.missing_values_summary(
         ),
     ]
 )
-# print(
-#     missing_summary[missing_summary.iloc[:, 1] > 0].to_latex(
-#         escape=True, float_format="%.2f"
-#     )
-# )
 
-# Detect multicollinearity
-multi_col = prep.detect_multicollinearity(df=data, threshold=0.8, target="run_time")
-print(multi_col)
+# Define feature sets for modeling
 
 features_athletes_variant = [
     "z_score",
@@ -301,139 +258,63 @@ features_run = [
 
 features_athlete_id = ["name", "date"]
 
-from sklearn.impute import SimpleImputer
-
 
 def prepare_data(df):
-    data_imputed = pd.get_dummies(df, drop_first=False, dtype=int)
+    data_imputed = pd.get_dummies(df, drop_first=True, dtype=int)
     data_imputed.columns = data_imputed.columns.str.replace(" ", "_")
 
-    # data_imputed_matrix = IterativeImputer(
-    #     estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=2
-    # ).fit_transform(X=data_imputed)
+    data_imputed_matrix = IterativeImputer(
+        estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=10
+    ).fit_transform(X=data_imputed)
 
-    data_imputed_matrix = SimpleImputer(strategy="mean").fit_transform(X=data_imputed)
     data_imputed = pd.DataFrame(
         data_imputed_matrix, columns=data_imputed.columns, index=data_imputed.index
     )
     return data_imputed
 
 
-# data_imputed = pd.read_csv("data/data_imputed.csv")
+# Impute and save prepared data
 
-# 3. MODELLING ------------------------------------------------------------------
-target = "z_score"
+data_prepared = data.copy().filter(
+    features_athletes_invariant + features_athletes_variant
+)
+data_prepared.to_csv("data/data_prepared.csv", index=True)
 
-# 3.1 OLS model -----------------------------------------------------------------
 data_ols = prepare_data(
     data.copy().filter(features_athletes_invariant + features_athletes_variant)
 )
+data_ols.to_csv("data/data_ols.csv", index=True)
 
-ols = sm.OLS(
-    exog=sm.add_constant(data_ols.drop(target, axis=1)), endog=data_ols[target]
-)
-ols_fit = ols.fit()
-ols_fit.summary()
-
-# 3,3 Panel data ------------------------------------------------------
 data_panel = prepare_data(
     data.copy().set_index(features_athlete_id).filter(features_athletes_variant)
 )
+data_panel.to_csv("data/data_panel.csv", index=True)
 
-# Conduct within transformation
-data_panel = prep.FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
-
-# Fixed effects model
-ols_panel = sm.OLS(
-    exog=sm.add_constant(data_panel.drop(target, axis=1)), endog=data_panel[target]
+# Create variable summaries
+data_summary = data_prepared.dtypes.to_frame(name="dtype")
+data_summary["panel"] = data_prepared.columns.isin(features_athletes_invariant)
+data_summary["ols"] = data_prepared.columns.isin(features_athletes_variant)
+data_summary["Description"] = [
+    "Country of athlete",
+    "Ski brand of athlete",
+    "The target variable. Z-score of athlete",
+    "Start time of athlete in the race in minutes since midnight",
+    "Age of athlete in years at the time of the race",
+    "Total world cup points of the athlete's nation during the last season",
+    "Binary variable indicating whether the athlete was treated",
+    "Binary variable indicating whether the athlete was in the world cup start list",
+    "Mean rank of athlete in the last 15 days",
+    "Mean rank of athlete in the last 60 days",
+    "Distance to the tournament in kilometers from the athlete's home country",
+    "The fraction of past races the athlete has participated in this discipline",
+    "The count of past races the athlete has participated in this discipline",
+]
+data_summary = data_summary[["Description", "dtype", "panel", "ols"]]
+data_summary.columns = ["Description", "Type", "Panel", "Pooled"]
+print(
+    data_summary.to_latex(float_format="{:0.2f}".format, column_format="lp{5cm}lrr")
+    .replace("_", "\_")
+    .replace("object", "cat.")
+    .replace("int64", "int.")
+    .replace("float64", "cont.")
 )
-ols_panel_fit = ols_panel.fit()
-ols_panel_fit.summary()
-
-
-# 3.4 PLR --------------------------------------------------------------
-data_plr_imputed = prepare_data(
-    data.copy()
-    .set_index(features_athlete_id)
-    .filter(features_athletes_invariant + features_athletes_variant)
-)
-
-data_plr_panel = prep.FixedEffectsPreprocessor().fit_transform(
-    X=data_plr_imputed[features_athletes_variant].reset_index()
-)
-
-# Insert the transformed features
-data_plr = data_plr_imputed.copy()
-data_plr = data_plr.assign(
-    **{col: data_plr_panel[col] for col in data_plr_panel.columns if col != "treatment"}
-)
-
-# Get original treatment variable ()
-data_container = DoubleMLData(
-    data_plr.reset_index(drop=True),
-    y_col=target,
-    d_cols="treatment",
-    force_all_x_finite="allow-nan",
-)
-
-double_ml = DoubleMLPLR(
-    data_container,
-    CatBoostRegressor(),
-    CatBoostClassifier(),
-)
-double_ml.fit()
-print(double_ml)
-
-
-# Out-of-sample Performance:
-# Learner ml_l RMSE: [[0.69205823]]
-# Learner ml_m RMSE: [[0.26788376]]
-
-
-# 5. Interpretation ------------------------------------------------------
-# Simulate treatment effect on the whole dataset
-# rank_ols = prep.simulate_treatment_effect(data=data,
-#                                           treatment_effect=prep.extract_treatment_effect(ols).loc["beta"])
-# rank_ols.rank_change.mean()
-# rank_ols.rank_change.hist(bins=30)
-# plt.show()
-#
-# # Rank changes for panel
-# rank_panel = prep.simulate_treatment_effect(
-#     data, prep.extract_treatment_effect(panel_ols_summary).loc["beta"]
-# )
-# rank_panel.rank_change.mean()
-# rank_panel.rank_change.hist(bins=30)
-# plt.show()
-#
-# # Rank changes for double ml
-# rank_double_ml = prep.simulate_treatment_effect(data, double_ml.coef[0])
-# rank_double_ml.rank_change.mean()
-# rank_double_ml.rank_change.hist(bins=30)
-# plt.show()
-#
-#
-# plot_data = pd.concat(
-#     [
-#         rank_ols.assign(model='ols'),
-#         rank_panel.assign(model='panel-ols'),
-#         rank_double_ml.assign(model='double-ml'),
-#     ],
-#     axis=0,
-# )
-# plot_data['model'] = plot_data.model.values + plot_data.treatment_effect.round(3).str.to_list()
-# # Plot the rank change for each model in one plot
-# plot = sns.boxplot(data=plot_data,
-#             x='model',
-#             y='rank_change',
-#             palette='Set3',
-#             linewidth=1.2,
-#             fliersize=2,
-# flierprops=dict(marker='o', markersize=4)
-#             )
-# plt.show()
-# plot.figure.savefig('plots/rank_change.pdf')
-# # Descriptive analysis -------------------------------------------------------
-# summary = data.groupby(['details_competition_type', 'gender']).describe().T
-# summary = data.describe().T
-#

@@ -22,7 +22,7 @@ logging.basicConfig(
 )
 
 # 0. LOAD THE DATA ------------------------------------------------------
-data = pd.read_csv("data/data_group_1.csv", sep=";")
+data = pd.read_csv("../../data/data_group_1.csv", sep=";")
 data.dropna(subset=["run_time"], inplace=True)
 data["location"] = data["location"].str.replace(
     "CORTINA D' AMPEZZO", "CORTINA D'AMPEZZO"
