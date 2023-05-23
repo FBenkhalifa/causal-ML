@@ -1,12 +1,15 @@
 import pandas as pd
+import numpy as np
 from doubleml import DoubleMLPLR
-from catboost import CatBoostRegressor, CatBoostClassifier
+from catboost import CatBoostRegressor
 from doubleml import DoubleMLData
 from sklearn.experimental import enable_iterative_imputer  # noqa
 from microeconometrics import preprocessing as prep
 from statsmodels import api as sm
 from microeconometrics.ols import LinearModel
 
+# Set numpy seed for reproducibility (for DML)
+np.random.seed(1995)
 
 # Load Data
 data_ols = pd.read_csv("data/data_ols.csv", index_col=0)
@@ -16,34 +19,43 @@ target = "z_score"
 
 # 3.1 OLS model -----------------------------------------------------------------
 
-exog = data_ols.drop(target, axis=1).assign(Intercept=1)
-endog = data_ols[target]
+exog_ols = data_ols.drop(target, axis=1).assign(Intercept=1)
+endog_ols = data_ols[target]
 
-ols = sm.OLS(exog=exog, endog=endog)
-ols_fit = ols.fit(cov_type="HC0")
-ols_fit.summary()
-ols_fit.params
+# Fit custom OLS
+model_ols = LinearModel(robust=True)
+model_ols.fit(X=exog_ols, y=endog_ols)
+model_ols.summary()
 
-model = LinearModel(robust=True)
-model.fit(X=exog, y=endog)
-model.summary()
-model.coefs
+# Check using statsmodels
+check_ols = sm.OLS(exog=exog_ols, endog=endog_ols)
+check_ols_fit = check_ols.fit(cov_type="HC0")
+check_ols_fit.summary()
 
-params_frame = pd.concat([ols_fit.params, model.coefs], axis=1)
-
-self = model
+# Eyeball differences
+params_frame = pd.concat([check_ols_fit.params, model_ols.coefs], axis=1)
+pvals_frame = pd.concat([check_ols_fit.pvalues, model_ols.pvalues], axis=1)
 
 # 3,3 Panel data ------------------------------------------------------
 
 # Conduct within transformation
 data_panel = prep.FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
+exog_panels = data_panel.drop(target, axis=1).assign(Intercept=1)
+endog_panels = data_panel[target]
 
-# Fixed effects model
-ols_panel = sm.OLS(
-    exog=sm.add_constant(data_panel.drop(target, axis=1)), endog=data_panel[target]
-)
-ols_panel_fit = ols_panel.fit()
-ols_panel_fit.summary()
+# Fit custom OLS
+model_panel = LinearModel(robust=True)
+model_panel.fit(X=exog_panels, y=endog_panels)
+model_panel.summary()
+
+# Check using statsmodels
+check_panel = sm.OLS(exog=exog_panels, endog=endog_panels)
+check_panel_fit = check_panel.fit(cov_type="HC0")
+check_panel_fit.summary()
+
+# Eyeball differences
+params_frame = pd.concat([check_panel_fit.params, model_panel.coefs], axis=1)
+pvals_frame = pd.concat([check_panel_fit.pvalues, model_panel.pvalues], axis=1)
 
 
 # 3.4 PLR --------------------------------------------------------------
@@ -54,11 +66,13 @@ data_container = DoubleMLData(
     d_cols="treatment",
     force_all_x_finite="allow-nan",
 )
-
+# Fit PLR - we increase the number of repetitions and folds since the results seem to be quite unstable
 double_ml = DoubleMLPLR(
     data_container,
-    CatBoostRegressor(),
-    CatBoostClassifier(),
+    CatBoostRegressor(verbose=False),
+    CatBoostRegressor(verbose=False),
+    n_rep=5,
+    n_folds=10,
 )
 double_ml.fit()
 print(double_ml)

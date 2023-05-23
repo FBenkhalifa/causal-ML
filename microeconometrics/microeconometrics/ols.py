@@ -105,6 +105,13 @@ class LinearModel:
         return pd.Series(self._coefs, index=self._varnames)
 
     @property
+    def pvalues(self) -> pd.Series:
+        if not self._is_fitted:
+            raise ValueError("Model not fitted yet.")
+
+        return pd.Series(self._p_values, index=self._varnames)
+
+    @property
     def coefs_summary(self) -> pd.DataFrame:
         if not self._is_fitted:
             raise ValueError("Model not fitted yet.")
