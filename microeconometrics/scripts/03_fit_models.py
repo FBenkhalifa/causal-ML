@@ -12,7 +12,8 @@ from microeconometrics.ols import LinearModel
 data_ols = pd.read_csv("data/data_ols.csv", index_col=0)
 
 # Convert one-hot to dummy
-data_ols.drop(columns=["country_AUT", "skis_fischer"], inplace=True)
+# Remove ski == blizzard because it is colinear with country ALB
+data_ols.drop(columns=["country_AUT", "skis_fischer", "skis_blizzard"], inplace=True)
 
 data_panel = pd.read_csv("data/data_panel.csv")
 
@@ -20,19 +21,22 @@ target = "z_score"
 
 # 3.1 OLS model -----------------------------------------------------------------
 
-ols = sm.OLS(
-    exog=data_ols.drop(target, axis=1).assign(Intercept=1), endog=data_ols[target]
-)
+exog = data_ols.drop(target, axis=1).assign(Intercept=1)
+endog = data_ols[target]
+ols = sm.OLS(exog=exog, endog=endog)
+
+exog.var().sort_values(ascending=True).head()
 
 ols_fit = ols.fit()
 ols_fit.summary()
+ols_fit.params
 
-
-model = LinearModel()
-model.fit(X=data_ols.drop(target, axis=1).assign(Intercept=1), y=data_ols[target])
+model = LinearModel(robust=False)
+model.fit(X=exog, y=endog)
 model.summary()
+model.coefs
 
-
+params_frame = pd.concat([ols_fit.params, model.coefs], axis=1)
 
 self = model
 

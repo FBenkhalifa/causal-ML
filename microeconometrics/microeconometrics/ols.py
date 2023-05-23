@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn.utils import check_X_y
 from scipy.stats import t, f
+from scipy.linalg import qr
 
 
 class LinearModel:
@@ -36,7 +37,13 @@ class LinearModel:
         n, p = X.shape
 
         # Get the coefficient estimates
-        coefs = np.linalg.inv(X.T @ X) @ X.T @ y
+        # coefs = np.linalg.inv(X.T @ X) @ X.T @ y
+
+        # DO QR decomposition for numerical stability
+        q_mat, r_mat = qr(X, mode="economic")
+
+        # Solving the system of equations
+        coefs = np.linalg.solve(r_mat, q_mat.T @ y)
 
         # Calculating residuals which we need for standard errors
         e = y - X @ coefs
@@ -136,7 +143,7 @@ class LinearModel:
         print(
             "==============================================================================="
         )
-        print(param_table.round(2).to_string())
+        print(param_table.round(3).to_string())
         print(
             "==============================================================================="
         )
