@@ -1,21 +1,31 @@
+import os
+
 import numpy as np
 import pandas as pd
 from catboost import CatBoostRegressor
 from doubleml import DoubleMLData, DoubleMLPLR
 from statsmodels import api as sm
 
-from functions import (FixedEffectsPreprocessor, LinearModel,
-                       make_combined_hist, prepare_data,
-                       print_variable_summaries_latex)
+from functions import (
+    FixedEffectsPreprocessor,
+    LinearModel,
+    make_combined_hist,
+    prepare_data,
+    print_variable_summaries_latex,
+)
 
 # Set numpy seed for reproducibility (for DML)
 np.random.seed(1995)
 
 # 1. Load and prepare data ------------------------------------------------------
-data_prepared, data_ols, data_panel = prepare_data()
+data_prepared, data_ols, data_panel, data_plot = prepare_data()
+
+# Cache data
+os.makedirs("data", exist_ok=True)
 data_panel.to_csv("data/data_panel.csv", index=True)
 data_ols.to_csv("data/data_ols.csv", index=True)
 data_prepared.to_csv("data/data_prepared.csv", index=True)
+data_plot.to_csv("data/data_plot.csv", index=False)
 
 # data_panel = pd.read_csv("data/data_panel.csv").set_index(["name", "date"])
 # data_ols = pd.read_csv("data/data_ols.csv", index_col=0)

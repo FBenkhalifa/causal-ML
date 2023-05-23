@@ -1,4 +1,3 @@
-import datetime
 import logging
 import os
 from datetime import datetime, timedelta
@@ -19,8 +18,6 @@ from sklearn.impute import IterativeImputer
 from sklearn.linear_model import BayesianRidge, LassoCV
 from sklearn.utils import check_X_y
 from tqdm import tqdm
-
-np.random.seed(13)
 
 
 # Data preprocessing ---------------------------------------------------------------------------------------------------
@@ -541,7 +538,7 @@ def impute_data(df: pd.DataFrame) -> pd.DataFrame:
 
 def prepare_data(
     path: str = "data/data_group_1.csv",
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     This function prepares the data for the modeling part.
     """
@@ -554,7 +551,7 @@ def prepare_data(
     data.dropna(subset=["run_time"])
     data["run_time"] = pd.to_datetime(
         data["run_time"], format="%M:%S.%f", errors="coerce"
-    ) - datetime.datetime(1900, 1, 1)
+    ) - datetime(1900, 1, 1)
     data["run_time"] = data["run_time"].dt.total_seconds() * 1_000
     data.dropna(subset=["run_time"], inplace=True)
 
@@ -776,7 +773,7 @@ def prepare_data(
         data.copy().set_index(features_athlete_id).filter(features_athletes_variant)
     )
 
-    return data_prepared, data_ols, data_panel
+    return data_prepared, data_ols, data_panel, data
 
 
 def print_variable_summaries_latex(data_prepared: pd.DataFrame) -> pd.DataFrame:
