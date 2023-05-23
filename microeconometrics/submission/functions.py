@@ -1185,7 +1185,7 @@ def make_combined_hist(data: pd.DataFrame, save_path: str = None) -> None:
 # used for illustration in the paper, same results as previuos function
 
 
-def hists_combi_one_pane(data_sets, num_cols=4):
+def hists_combi_one_pane(data_sets, num_cols: int = 4):
     """
     Plots histograms of continuous variables with more than two unique values
     for multiple datasets on one single pane.
