@@ -32,11 +32,10 @@ print_variable_summaries_latex(data_prepared)
 # 2. Describe data ------------------------------------------------------
 data = pd.read_csv("data/data_group_1.csv", sep=";")
 
-make_combined_hist(data, "data_combined_hist.pdf")
+make_combined_hist(data, save_path="data_combined_hist.pdf")
 
 
 # 3. Fit models ------------------------------------------------------
-
 target = "z_score"
 
 # 3.1 Pooled OLS model -----------------------------------------------------------------

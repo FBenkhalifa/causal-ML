@@ -654,15 +654,20 @@ def hists_combined(data_sets, save_path: str = None) -> None:
         )
         for _ in range(len(data_sets))
     ]
+    fig, axs = plt.subplots(ncols=3, nrows=4, figsize=(25, 20))
 
+    idx = 0
     for col in data_sets[list(data_sets.keys())[0]].columns:
         # check if the column is continuous and not a dummy
         if (
             data_sets[list(data_sets.keys())[0]][col].dtype in [float, int]
             and data_sets[list(data_sets.keys())[0]][col].nunique() > 2
         ):
-            # create a new plot
-            fig, ax = plt.subplots()
+            # get the axis index
+            plot_col_idx = idx % 3
+            plot_row_idx = idx // 3
+
+            ax = axs[plot_row_idx, plot_col_idx]
 
             # set the plot title
             ax.set_title(col)
@@ -680,6 +685,7 @@ def hists_combined(data_sets, save_path: str = None) -> None:
 
             # add a legend to the plot
             ax.legend()
+            idx += 1
 
     if save_path:
         plt.savefig(save_path)

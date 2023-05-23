@@ -4,11 +4,11 @@
 Microeconometrics: Self Study.
 
 Authors: 
-    
+
     Maximilian Jakob Arrich
     Florian Benkhalifa
     Linda Fiorina Odermatt (17-946-310)
-    
+
 Spring Semester 2023.
 
 University of St. Gallen.
@@ -24,8 +24,7 @@ from microeconometrics import descriptive as ss_fcts
 # Load the data
 # =============================================================================
 # load in data using pandas
-data = pd.read_csv('../../data/data_group_1.csv', sep=";")
-
+data = pd.read_csv('data/data_group_1.csv', sep=";")
 
 # =============================================================================
 # Descriptive statistics
@@ -35,7 +34,6 @@ data.dtypes
 
 print(data.loc[:, data.dtypes == "object"].columns)
 print(data.select_dtypes(include=["int64", "float64"]).columns)
-
 
 # conversion to dummy variables + int64
 data_gender = pd.get_dummies(data["gender"]).astype("int64")
@@ -54,7 +52,6 @@ for val in data["details_competition_type"].unique():
     vars()[df_name] = data[data["details_competition_type"] == val].copy()
     data_sets[df_name] = vars()[df_name]
 
-
 # descriptive statistics
 # empty dictionaries
 stats_num = {}
@@ -68,11 +65,9 @@ for data_set in data_sets:
         data_sets[data_set]
     )
 
-
 # check names
 stats_num.keys()
 stats_string.keys()
-
 
 # check individual histograms of the covariates
 ss_fcts.hists_individual(data_sets["data_Giant Slalom"])
@@ -83,7 +78,6 @@ ss_fcts.hists_individual(data_sets["data_Super G"])
 
 # check combined histograms of the numeric covariates for comparatives
 ss_fcts.hists_combined(data_sets)
-
 
 # correlation matrix numeric variables
 # loop through the keys in the data_sets dictionary
