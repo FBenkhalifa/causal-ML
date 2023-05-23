@@ -1,17 +1,12 @@
-from functions import (
-    prepare_data,
-    print_variable_summaries_latex,
-    LinearModel,
-    make_combined_hist,
-)
-import pandas as pd
 import numpy as np
-from doubleml import DoubleMLPLR
+import pandas as pd
 from catboost import CatBoostRegressor
-from doubleml import DoubleMLData
-from sklearn.experimental import enable_iterative_imputer  # noqa
-from microeconometrics import preprocessing as prep
+from doubleml import DoubleMLData, DoubleMLPLR
 from statsmodels import api as sm
+
+from functions import (FixedEffectsPreprocessor, LinearModel,
+                       make_combined_hist, prepare_data,
+                       print_variable_summaries_latex)
 
 # Set numpy seed for reproducibility (for DML)
 np.random.seed(1995)
@@ -32,8 +27,10 @@ print_variable_summaries_latex(data_prepared)
 # 2. Describe data ------------------------------------------------------
 data = pd.read_csv("data/data_group_1.csv", sep=";")
 
+# Create combined histograms
 make_combined_hist(data, save_path="data_combined_hist.pdf")
 
+# See also the file plots.R for more plots
 
 # 3. Fit models ------------------------------------------------------
 target = "z_score"
@@ -60,7 +57,7 @@ pvals_frame = pd.concat([check_ols_fit.pvalues, model_ols.pvalues], axis=1)
 # 3.3 Panel OLS model ------------------------------------------------------
 
 # Conduct within transformation
-data_panel = prep.FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
+data_panel = FixedEffectsPreprocessor().fit_transform(X=data_panel.reset_index())
 exog_panels = data_panel.drop(target, axis=1).assign(Intercept=1)
 endog_panels = data_panel[target]
 
