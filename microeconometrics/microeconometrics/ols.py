@@ -48,7 +48,7 @@ class LinearModel:
         # Calculating residuals which we need for standard errors
         e = y - X @ coefs
 
-        # Calculating res sum of squares and total sum of squares
+        # Calculating res sum of squares
         rss = e.T @ e
         tss = np.sum((y - np.mean(y)) ** 2)
 
@@ -56,22 +56,19 @@ class LinearModel:
         df_reg = p
         df_resid = n - p - 1
 
-        # Get the estimated variance of the error term
-        var_residuals = rss / df_resid
-
-        # Get covariance of errors and covariates
-        cov_matrix = var_residuals * np.linalg.inv(X.T @ X)
-
         if self.robust:
             # Calculating robust standard errors using White covariance estimator
-            robust_cov_matrix = (
-                var_residuals
-                * np.linalg.inv(X.T @ X)
+            cov_matrix = (
+                np.linalg.inv(X.T @ X)
                 @ X.T
+                @ np.diag(e**2)
                 @ X
                 @ np.linalg.inv(X.T @ X)
             )
+
         else:
+            # Get the estimated variance of the error term
+            var_residuals = rss / df_resid
             cov_matrix = var_residuals * np.linalg.inv(X.T @ X)
 
         # Extracting standard errors

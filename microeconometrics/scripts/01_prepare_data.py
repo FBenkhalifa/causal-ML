@@ -52,6 +52,9 @@ data["coursesetter"] = data["coursesetter"].replace(
 # Harmonize the names of the skis
 data["skis"] = data["skis"].str.lower()
 
+# Drop blizzard observation - they are colinear with the country
+data = data.query('skis != "blizzard"')
+
 # Harmonize the locations
 data["location"] = data["location"].str.replace(
     "CORTINA D' AMPEZZO", "CORTINA D'AMPEZZO"
@@ -260,8 +263,13 @@ features_athlete_id = ["name", "date"]
 
 
 def prepare_data(df):
-    data_imputed = pd.get_dummies(df, drop_first=True, dtype=int)
+    data_imputed = pd.get_dummies(df, drop_first=False, dtype=int)
     data_imputed.columns = data_imputed.columns.str.replace(" ", "_")
+    if "country" in df:
+        data_imputed.drop(columns=["country_SUI"], inplace=True)
+
+    if "skis" in df:
+        data_imputed.drop(columns=["skis_fischer"], inplace=True)
 
     data_imputed_matrix = IterativeImputer(
         estimator=BayesianRidge(), random_state=0, verbose=2, max_iter=10
